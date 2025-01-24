@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, The vLLM team.
+ * Copyright (C) 2024-2025, The vLLM team.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -601,7 +601,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     constexpr int VTOKENS_PER_LANE =
         TOKENS_PER_WARP / ROWS_PER_WARP; // 64/4 = 16 contiguous vtokens per lane
     constexpr int VBLOCKS_PER_LANE =
-        1; // assumes block size >=16, each lane can correspond to 1 block only
+        DIVIDE_ROUND_UP(16, BLOCK_SIZE); ; // assumes block size >=16, each lane can correspond to 1 block only
     constexpr int VTLOOP = NWARPS; // corresponds to tokens across warps
     constexpr int VTLANELOOP =
         DIVIDE_ROUND_UP(VTOKENS_PER_LANE,
@@ -641,25 +641,17 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
         {
             for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++)
             {
-                const int vblock_depth = 0;
-                const int64_t vblock_number =
-                    static_cast<int64_t>(vphysical_block_number[vtoken_depth][vblock_depth]);
-                const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
-
-                const cache_t* v_fetch_ptr =
-                    v_ptr3 + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD * kv_seq_stride;
-
-                // read data points individually and save them into array
                 cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
-                for(int d2 = 0; d2 < CONTIGUOUS_KV_ELEMS_16B_LOAD; ++d2)
+                for(int idx = 0; idx < CONTIGUOUS_KV_ELEMS_16B_LOAD; idx++)
                 {
-                    const cache_t* elem = v_fetch_ptr + d2 * kv_seq_stride;
-                    elems[d2]           = *elem;
-                }
+                    const int64_t vblock_number =
+                        static_cast<int64_t>(vphysical_block_number[vtoken_depth][idx+vfetch_depth*CONTIGUOUS_KV_ELEMS_16B_LOAD]);
+                    const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
+                    const cache_t* v_fetch_ptr = v_ptr3;
 
-                // copy all the read data points together
-                Vlocal[vtoken_depth][vhe_depth][vfetch_depth] =
-                    *reinterpret_cast<const _B16x8*>(elems);
+                    elems[idx]=*v_fetch_ptr;
+                }
+                Vlocal[vtoken_depth][vhe_depth][vfetch_depth]=*reinterpret_cast<const _B16x8*>(elems);
             }
         }
     }
@@ -2073,6 +2065,7 @@ void paged_attention_custom_launcher(torch::Tensor& out,
 #define CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, HEAD_SIZE)                   \
     switch(block_size)                                                          \
     {                                                                           \
+    case 1: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 1, HEAD_SIZE); break;  \
     case 16: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 16, HEAD_SIZE); break;  \
     case 32: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 32, HEAD_SIZE); break;  \
     default: TORCH_CHECK(false, "Unsupported block size: ", block_size); break; \
