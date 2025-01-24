@@ -641,17 +641,39 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
         {
             for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++)
             {
-                cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
-                for(int idx = 0; idx < CONTIGUOUS_KV_ELEMS_16B_LOAD; idx++)
-                {
-                    const int64_t vblock_number =
-                        static_cast<int64_t>(vphysical_block_number[vtoken_depth][idx+vfetch_depth*CONTIGUOUS_KV_ELEMS_16B_LOAD]);
-                    const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
-                    const cache_t* v_fetch_ptr = v_ptr3;
+                if constexpr(BLOCK_SIZE == 1){
+                    cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
+                    for(int idx = 0; idx < CONTIGUOUS_KV_ELEMS_16B_LOAD; idx++)
+                    {
+                        const int64_t vblock_number =
+                            static_cast<int64_t>(vphysical_block_number[vtoken_depth][idx+vfetch_depth*CONTIGUOUS_KV_ELEMS_16B_LOAD]);
+                        const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
+                        const cache_t* v_fetch_ptr = v_ptr3;
 
-                    elems[idx]=*v_fetch_ptr;
+                        elems[idx]=*v_fetch_ptr;
+                    }
+                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
+                }else{
+                    const int vblock_depth = 0;
+                    const int64_t vblock_number =
+                        static_cast<int64_t>(vphysical_block_number[vtoken_depth][vblock_depth]);
+                    const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
+
+                    const cache_t* v_fetch_ptr =
+                        v_ptr3 + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD * kv_seq_stride;
+
+                    // read data points individually and save them into array
+                    cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
+                    for(int d2 = 0; d2 < CONTIGUOUS_KV_ELEMS_16B_LOAD; ++d2)
+                    {
+                        const cache_t* elem = v_fetch_ptr + d2 * kv_seq_stride;
+                        elems[d2]           = *elem;
+                    }
+
+                    // copy all the read data points together
+                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
                 }
-                Vlocal[vtoken_depth][vhe_depth][vfetch_depth]=*reinterpret_cast<const _B16x8*>(elems);
+
             }
         }
     }
