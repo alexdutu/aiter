@@ -641,12 +641,11 @@ def test_paged_attention(
         if pa_variant == PAVariant.Shomy:
             if kv_cache_layout == 'NHD':
                 key_cache_new = rearrange(key_cache_new, 'b h s d -> b s h d')
-                value_cache_new = rearrange(value_cache_new, 'b h s d -> b s h d')
 
             out_ater, time_ater = run_ater(
                 query,
                 key_cache_new.contiguous(),
-                value_cache_new.contiguous(),
+                value_cache.contiguous(),
                 block_tables,
                 seq_lens,
                 max_seq_len,
