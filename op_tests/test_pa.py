@@ -425,7 +425,7 @@ def test_paged_attention(
 ) -> None:
     torch.set_default_device(device)
     # Using default kv_scale
-    k_scale = v_scale = 1.0
+    k_scale = v_scale = torch.tensor([1.0], dtype=torch.float32)
     scale = float(1.0 / (head_size**0.5))
     num_query_heads, num_kv_heads = num_heads
     alibi_slopes = None
