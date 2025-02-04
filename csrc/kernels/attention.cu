@@ -575,9 +575,7 @@ __global__ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma
         for(int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++)
         {
             const int head_elem           = row_head_elem + qkhe_depth * QKHE_PER_FETCH;
-            const int offset1             = head_elem / KX;
-            const int offset2             = head_elem % KX;
-            const cache_t* k_fetch_ptr    = k_ptr3 + offset1 * KX + offset2;
+            const cache_t* k_fetch_ptr    = k_ptr3 + head_elem;
             const _B16x8* k_fetch_ptr_16B = reinterpret_cast<const _B16x8*>(k_fetch_ptr);
             if constexpr(NT_KV_LOAD)
             {
