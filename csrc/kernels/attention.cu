@@ -1968,10 +1968,10 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     // mfma4 kernel is faster than mfma16 for gqa_ratio <= 4
     switch(gqa_ratio)
     {
-    case 1: LAUNCH_CUSTOM_ATTENTION_MFMA4(1); break;
-    case 2: LAUNCH_CUSTOM_ATTENTION_MFMA4(2); break;
-    case 3: LAUNCH_CUSTOM_ATTENTION_MFMA4(3); break;
-    case 4: LAUNCH_CUSTOM_ATTENTION_MFMA4(4); break;
+    case 1: LAUNCH_CUSTOM_ATTENTION_MFMA16(1); break;
+    case 2: LAUNCH_CUSTOM_ATTENTION_MFMA16(2); break;
+    case 3: LAUNCH_CUSTOM_ATTENTION_MFMA16(3); break;
+    case 4: LAUNCH_CUSTOM_ATTENTION_MFMA16(4); break;
     case 5: LAUNCH_CUSTOM_ATTENTION_MFMA16(5); break;
     case 6: LAUNCH_CUSTOM_ATTENTION_MFMA16(6); break;
     case 7: LAUNCH_CUSTOM_ATTENTION_MFMA16(7); break;
