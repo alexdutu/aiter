@@ -600,8 +600,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
 
     constexpr int VTOKENS_PER_LANE =
         TOKENS_PER_WARP / ROWS_PER_WARP; // 64/4 = 16 contiguous vtokens per lane
-    constexpr int VBLOCKS_PER_LANE =
-        DIVIDE_ROUND_UP(16, BLOCK_SIZE); ; // assumes block size >=16, each lane can correspond to 1 block only
+    constexpr int VBLOCKS_PER_LANE = DIVIDE_ROUND_UP(16, BLOCK_SIZE);
+    ; // assumes block size >=16, each lane can correspond to 1 block only
     constexpr int VTLOOP = NWARPS; // corresponds to tokens across warps
     constexpr int VTLANELOOP =
         DIVIDE_ROUND_UP(VTOKENS_PER_LANE,
@@ -641,19 +641,25 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
         {
             for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++)
             {
-                if constexpr(BLOCK_SIZE == 1){
+                if constexpr(BLOCK_SIZE == 1)
+                {
                     cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
                     for(int idx = 0; idx < CONTIGUOUS_KV_ELEMS_16B_LOAD; idx++)
                     {
-                        const int64_t vblock_number =
-                            static_cast<int64_t>(vphysical_block_number[vtoken_depth][idx+vfetch_depth*CONTIGUOUS_KV_ELEMS_16B_LOAD]);
-                        const cache_t* v_ptr3 = v_ptr2 + (vblock_number * kv_block_stride);
+                        const int64_t vblock_number = static_cast<int64_t>(
+                            vphysical_block_number[vtoken_depth]
+                                                  [idx +
+                                                   vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD]);
+                        const cache_t* v_ptr3      = v_ptr2 + (vblock_number * kv_block_stride);
                         const cache_t* v_fetch_ptr = v_ptr3;
 
-                        elems[idx]=*v_fetch_ptr;
+                        elems[idx] = *v_fetch_ptr;
                     }
-                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
-                }else{
+                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth] =
+                        *reinterpret_cast<const _B16x8*>(elems);
+                }
+                else
+                {
                     const int vblock_depth = 0;
                     const int64_t vblock_number =
                         static_cast<int64_t>(vphysical_block_number[vtoken_depth][vblock_depth]);
@@ -671,9 +677,9 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                     }
 
                     // copy all the read data points together
-                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
+                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth] =
+                        *reinterpret_cast<const _B16x8*>(elems);
                 }
-
             }
         }
     }
@@ -2087,7 +2093,7 @@ void paged_attention_custom_launcher(torch::Tensor& out,
 #define CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, HEAD_SIZE)                   \
     switch(block_size)                                                          \
     {                                                                           \
-    case 1: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 1, HEAD_SIZE); break;  \
+    case 1: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 1, HEAD_SIZE); break;    \
     case 16: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 16, HEAD_SIZE); break;  \
     case 32: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 32, HEAD_SIZE); break;  \
     default: TORCH_CHECK(false, "Unsupported block size: ", block_size); break; \
