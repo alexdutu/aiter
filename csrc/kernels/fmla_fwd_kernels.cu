@@ -156,7 +156,7 @@ constexpr size_t TileSchedulerMetaDataSizeInDw = sizeof(TileSchedulerMetaData) /
 
 struct FlashMlaFwdParams
 {
-    int32_t* __restrict__ p_cu_seqlens_k;
+    int32_t* __restrict__ p_seqlens_k;
     int32_t* __restrict__ p_block_table;
     int32_t* __restrict__ p_tile_scheduler_metadata;
     int32_t* __restrict__ p_num_splits;
