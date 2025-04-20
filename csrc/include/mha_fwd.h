@@ -8,6 +8,7 @@ struct mha_fwd_traits : public fmha_fwd_traits
                    int head_size_v,
                    std::string dtype,
                    bool is_group_mode,
+                   bool has_logits_soft_cap,
                    const mask_info& mask,
                    bias_enum bias_type,
                    bool has_lse,
@@ -17,6 +18,7 @@ struct mha_fwd_traits : public fmha_fwd_traits
                           dtype,
                           is_group_mode,
                           true, // is_v_rowmajor
+                          has_logits_soft_cap,
                           mask.type,
                           bias_type,
                           has_lse,
@@ -32,6 +34,7 @@ struct mha_fwd_splitkv_traits : public fmha_fwd_splitkv_traits
                            int head_size_v,
                            std::string dtype,
                            bool is_group_mode,
+                           bool has_logits_soft_cap,
                            const mask_info& mask,
                            bias_enum bias_type,
                            bool has_lse)
@@ -40,6 +43,7 @@ struct mha_fwd_splitkv_traits : public fmha_fwd_splitkv_traits
                                   dtype,
                                   is_group_mode,
                                   true, // is_v_rowmajor
+                                  has_logits_soft_cap,
                                   mask.type,
                                   bias_type,
                                   has_lse,
