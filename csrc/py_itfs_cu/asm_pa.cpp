@@ -51,10 +51,11 @@ torch::Tensor pa_fwd(torch::Tensor &Q,            //   [num_seqs, num_heads, hea
                      torch::Tensor &block_tables, //   [num_seqs, max_num_blocks_per_seq]
                      torch::Tensor &context_lens, //   [num_seqs]
                      int max_num_blocks,
-                     std::optional<torch::Tensor> &K_QScale,
-                     std::optional<torch::Tensor> &V_QScale,
-                     std::optional<torch::Tensor> &out_,
-                     std::optional<torch::Tensor> &qo_indptr,
+                     int max_qlen = 1,
+                     std::optional<torch::Tensor> K_QScale = std::nullopt,
+                     std::optional<torch::Tensor> V_QScale = std::nullopt,
+                     std::optional<torch::Tensor> out_ = std::nullopt,
+                     std::optional<torch::Tensor> qo_indptr = std::nullopt,
                      std::optional<int> high_precision = 1)
 {
     torch::Tensor output = out_.value_or(torch::empty_like(Q));
@@ -108,7 +109,7 @@ torch::Tensor pa_fwd(torch::Tensor &Q,            //   [num_seqs, num_heads, hea
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     AiterAsmKernel *impl_ptr = nullptr;
-    if (qo_indptr)
+    if (qo_indptr && max_qlen > 1)
     {
         TORCH_CHECK(Q.dtype() == at::ScalarType::BFloat16 && K_QScale && K.dtype() == at::ScalarType::Float8_e4m3fnuz,
                     __func__, ": qo_indptr only support bf16 asm pa with fp8 kv cache");

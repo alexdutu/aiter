@@ -147,10 +147,11 @@ def torch_mha_extend(
 
         block_table = block_tables[i]
         ctx_len = seq_lens[i].item()
-        idx = [
-            int(block_table[j // block_size]) * block_size + (j % block_size)
-            for j in range(ctx_len)
-        ]
+
+        idx = (
+            block_table.repeat_interleave(block_size)[:ctx_len] * block_size
+            + torch.arange(ctx_len, device=block_table.device) % block_size
+        )
 
         k = k_cache.view(torch.int8)[idx].view(kv_dtype).to(torch.float) * k_scale[
             :, idx
@@ -233,6 +234,7 @@ def run_aiter_asm(
     block_tables,
     seq_lens,
     max_num_blocks,
+    max_qlen,
     k_scale=None,
     v_scale=None,
     qo_indptr=None,
@@ -244,6 +246,7 @@ def run_aiter_asm(
         block_tables,
         seq_lens,
         max_num_blocks,
+        max_qlen,
         k_scale,
         v_scale,
         None,
@@ -285,6 +288,8 @@ def test_pa_mtp(
     # print(seq_lens_qo)
     qo_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_qo, dim=0)
     total_qo = qo_indptr[-1].item()
+    max_qlen = seq_lens_qo.max().item()
+
     query = torch.empty_strided(
         (total_qo, num_query_heads, head_size),
         ((num_query_heads + 2 * num_kv_heads) * head_size, head_size, 1),
@@ -331,6 +336,7 @@ def test_pa_mtp(
         block_tables,
         seq_lens,
         block_tables.size(1),
+        max_qlen,
         k_scale_asm,
         v_scale_asm,
         qo_indptr,
@@ -358,16 +364,17 @@ def test_pa_mtp(
         out_aiter_asm,
         msg=f"[torch vs  aiter_ck]:{us_ref:>8.2f} us vs {us_aiter_asm:>8.2f} us......",
     )
+    return {"torch": us_ref,  "aiter_asm": us_aiter_asm}
 
 
 head_dim = 128
 block_size = 16
 df = []
 for dtype in [torch.bfloat16]:
-    for ctx_len in [256, 512, 1200, 3200, 5200, 8192][:]:
-        for batch_size in [1, 3, 5, 16, 32, 64, 128, 256][:]:
-            for num_heads in [(8, 1), (16, 1)][:]:
-                test_pa_mtp(
+    for ctx_len in [7, 26, 57, 66, 109, 128, 257, 282, 4097][:]:
+        for batch_size in [128][:]:
+            for num_heads in [(5, 1), (8, 1), (16, 1)][:]:
+                ret = test_pa_mtp(
                     ctx_len,
                     batch_size,
                     num_heads,
@@ -377,3 +384,9 @@ for dtype in [torch.bfloat16]:
                     0,
                     "cuda:0",
                 )
+                df.append(ret)
+import pandas as pd
+
+df = pd.DataFrame(df)
+# df.to_csv("mla_prefill.csv")
+aiter.logger.info(f"summary:\n{df}")

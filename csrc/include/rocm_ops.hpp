@@ -49,6 +49,7 @@
             py::arg("block_tables"),             \
             py::arg("context_lens"),             \
             py::arg("max_num_blocks"),           \
+            py::arg("max_qlen") = 1,             \
             py::arg("K_QScale") = std::nullopt,  \
             py::arg("V_QScale") = std::nullopt,  \
             py::arg("out_") = std::nullopt,      \
