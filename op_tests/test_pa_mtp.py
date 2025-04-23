@@ -274,6 +274,7 @@ def test_pa_mtp(
     dtype: torch.dtype,
     seed: int,
     device: str,
+    qlen,
 ) -> None:
     torch.set_default_device(device)
     num_query_heads, num_kv_heads = num_heads
@@ -284,7 +285,9 @@ def test_pa_mtp(
     num_blocks_per_seq = (ctx_lens + block_size - 1) // block_size
 
     qo_indptr = torch.zeros(batch_size + 1, dtype=torch.int, device=device)
-    seq_lens_qo = torch.randint(1, 5, (batch_size,), dtype=torch.int, device=device)
+    seq_lens_qo = torch.randint(
+        1, 5, (batch_size,), dtype=torch.int, device=device
+    ).fill_(qlen)
     # print(seq_lens_qo)
     qo_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_qo, dim=0)
     total_qo = qo_indptr[-1].item()
@@ -359,34 +362,36 @@ def test_pa_mtp(
     # print(out_ref)
     # print(out_aiter_asm)
 
-    checkAllclose(
+    err = checkAllclose(
         out_ref,
         out_aiter_asm,
         msg=f"[torch vs  aiter_ck]:{us_ref:>8.2f} us vs {us_aiter_asm:>8.2f} us......",
     )
-    return {"torch": us_ref,  "aiter_asm": us_aiter_asm}
+    return {"torch": us_ref, "aiter_asm": us_aiter_asm, "err": err}
 
 
 head_dim = 128
 block_size = 16
-df = []
-for dtype in [torch.bfloat16]:
-    for ctx_len in [7, 26, 57, 66, 109, 128, 257, 282, 4097][:]:
-        for batch_size in [128][:]:
-            for num_heads in [(5, 1), (8, 1), (16, 1)][:]:
-                ret = test_pa_mtp(
-                    ctx_len,
-                    batch_size,
-                    num_heads,
-                    head_dim,
-                    block_size,
-                    dtype,
-                    0,
-                    "cuda:0",
-                )
-                df.append(ret)
 import pandas as pd
 
-df = pd.DataFrame(df)
-# df.to_csv("mla_prefill.csv")
-aiter.logger.info(f"summary:\n{df}")
+for dtype in [torch.bfloat16]:
+    for num_heads in [(5, 1), (8, 1), (16, 1)][:-1]:
+        for qlen in [1, 2, 3, 4]:
+            df = []
+            for ctx_len in [7, 26, 57, 66, 109, 128, 257, 282, 4097][:]:
+                for batch_size in [128][:]:
+                    ret = test_pa_mtp(
+                        ctx_len,
+                        batch_size,
+                        num_heads,
+                        head_dim,
+                        block_size,
+                        dtype,
+                        0,
+                        "cuda:0",
+                        qlen,
+                    )
+                    df.append(ret)
+            df = pd.DataFrame(df)
+            aiter.logger.info(f"summary:\n{df}")
+            # df.to_csv("mla_prefill.csv")
