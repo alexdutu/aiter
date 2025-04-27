@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <hip/hip_bf16.h>
 
+#include <ck_tile/ops/fmha/block/block_masking.hpp>
 #include <ck_tile/ops/fmha/block/variants.hpp>
 
 #include "hip_compat.h"
@@ -489,15 +490,19 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     const int wg_start_kv_head_idx = blockIdx.z;
     const int total_num_heads      = gridDim.z * GQA_RATIO;
 
+    /// NOTICE: We don't support mask for this kernel, so just use a placeholder type/object here.
+    using Mask = ck_tile::SimplifiedGenericAttentionMask</*IsMasking=*/false>;
+    const Mask mask{/*seqlen_q=*/1, /*seqlen_k=*/context_len};
+
     const auto variant_params = [&] {
         if constexpr(AttentionVariant::use_logits_soft_cap)
         {
-            return ck_tile::LogitsSoftCapParams<AttentionVariant::use_exp2>{
-                scale, logits_soft_cap, logits_soft_cap_rcp};
+            return ck_tile::LogitsSoftCapParams<Mask, AttentionVariant::use_exp2>{
+                mask, scale, logits_soft_cap, logits_soft_cap_rcp};
         }
         else
         {
-            return ck_tile::StandardAttentionParams{scale};
+            return ck_tile::StandardAttentionParams<Mask>{mask, scale};
         }
     }();
 
