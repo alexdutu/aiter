@@ -775,7 +775,12 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     {
         for(int i = 0; i < 4; i++)
         {
-            dout[token_depth][i] = variant.LogitsTransform(variant_params, dout[token_depth][i]);
+            dout[token_depth][i] =
+                variant.LogitsTransform(variant_params,
+                                        dout[token_depth][i],
+                                        /*batch_idx=*/blockIdx.x,
+                                        /*qo_head_idx=*/wg_start_head_idx + lane16id,
+                                        /*kv_head_idx=*/blockIdx.z);
         }
     }
 
