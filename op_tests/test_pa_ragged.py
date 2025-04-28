@@ -138,7 +138,7 @@ def ref_masked_attention(
     if attn_mask is not None:
         attn_weights = attn_weights + attn_mask.float()
     if 0 < logits_soft_cap:
-        attn_weights = logits_soft_cap * torch.tanh(attn_weights / logits_soft_cap)
+        attn_weights = attn_weights / (1.0 + torch.abs(attn_weights / logits_soft_cap))
     attn_weights = torch.softmax(attn_weights, dim=-1).to(value.dtype)
     out = torch.einsum("hqk,khd->qhd", attn_weights, value)
     return out
