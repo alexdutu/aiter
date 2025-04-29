@@ -32,10 +32,10 @@ Second, link the `.so` into your executable and compile. You need specify the co
 ## v3_bwd supported arguments comfiguration
 - common restrictions:
     - Only `gfx942` is supported
-    - `bias` and `dbias` must be set as `False`, both `alibi` and `elementwise` are not supported
-    - `dropout` must be set as `False`
+    - `bias` and `dbias` must be set to `False`, both `alibi` and `elementwise` are not supported
+    - `dropout` must be set to `False`
     - `mask` must be `causal` or no mask
-    - `deterministic` must be set as `False`
+    - `deterministic` must be set to `False`
     - `head_dim_q` must equal to `head_dim_v` and must be divisible by `8`
 
 - batch mode restrictions:
