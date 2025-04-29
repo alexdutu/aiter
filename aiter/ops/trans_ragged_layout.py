@@ -46,7 +46,7 @@ def _ragged_trans_kernel(
         if batch_idx >= 0 and batch_idx < B:
             batch_token_start = tl.load(kv_indptr_ptr + batch_idx)
             kv_start = tl.load(kv_indptr_ptr + batch_idx)
-            kv_end = tl.load(kv_indptr_ptr + batch_idx + 1)
+            # kv_end = tl.load(kv_indptr_ptr + batch_idx + 1)
 
             local_p_token_offset = cur_token_idx - batch_token_start
             E_DIM_mask = tl.arange(0, BLOCK_E_DIM) < E_DIM
