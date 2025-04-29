@@ -30,18 +30,18 @@ you can also call this python script from different directory, the generated `.s
 Second, link the `.so` into your executable and compile. You need specify the correct path through `-L` inorder to link to the device lib. You also need to specify the include directory through `-I`, for this example you need set `$TOP_DIR/csrc/include` for the `aiter` API header, and the dependent ck header `$TOP_DIR/3rdparty/composable_kernel/include` and `$TOP_DIR/3rdparty/composable_kernel/example/ck_tile/01_fmha/`. Please refer to `build_mha.sh` for detailed command
 
 ## v3_bwd supported arguments comfiguration
-### common restrictions:
-#### Only `gfx942` is supported
-#### `bias` and `dbias` must be set as `False`, both `alibi` and `elementwise` are not supported
-#### `dropout` must be set as `False`
-#### `mask` must be `causal` or no mask
-#### `deterministic` must be set as `False`
-#### `head_dim_q` must equal to `head_dim_v` and must be divisible by `8`
+- common restrictions:
+    - Only `gfx942` is supported
+    - `bias` and `dbias` must be set as `False`, both `alibi` and `elementwise` are not supported
+    - `dropout` must be set as `False`
+    - `mask` must be `causal` or no mask
+    - `deterministic` must be set as `False`
+    - `head_dim_q` must equal to `head_dim_v` and must be divisible by `8`
 
-### batch mode restrictions:
-#### `head_dim_q` must in range `[64, 192]`
+- batch mode restrictions:
+    - `head_dim_q` must in range `[64, 192]`
 
-### group mode restrictions:
-#### `head_dim_q` must in range `[64, 128]`
+- group mode restrictions:
+    - `head_dim_q` must in range `[64, 128]`
 
 More features like Sliding Window Attention is coming soon.
