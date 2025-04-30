@@ -1377,7 +1377,6 @@ def _bwd_kernel_dkdvdq_causal(
     delta_qk = seqlen_q - seqlen_k
 
     # q > k: diretcly skip all the way until the start of causal block
-    start_delta_q_gt_k = delta_qk
 
     # q < k: some blocks will have no Masked block, other needs to re-calc
     # starting position
