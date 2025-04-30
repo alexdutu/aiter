@@ -18,7 +18,6 @@ It supporst page size = 1.
 
 # Adapted from
 # https://github.com/ModelTC/lightllm/blob/f2a54f0912293f683bf1d1695fd12c4098a5bf82/lightllm/models/llama/triton_kernel/context_flashattention_nopad.py#L1
-import torch
 import triton
 import triton.language as tl
 
@@ -175,12 +174,12 @@ def context_attention_fwd(
     b_seq_len: [b]
     out: [b * s, head, head_dim]
     """
-    if (_is_cuda or _is_hip) and CUDA_CAPABILITY[0] > 8:
+    if _is_hip:
         BLOCK = 128
     else:
         BLOCK = 64
 
-    Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
+    Lq, Lk = q.shape[-1], k.shape[-1]
 
     sm_scale = 1.0 / (Lq**0.5)
     batch, head = b_seq_len.shape[0], q.shape[1]

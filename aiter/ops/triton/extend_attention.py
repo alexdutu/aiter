@@ -20,8 +20,8 @@ import torch
 import triton
 import triton.language as tl
 
-import context_attention_fwd
 
+from aiter.ops.triton.prefill_attention import context_attention_fwd
 
 def is_hip():
     return triton.runtime.driver.active.get_current_target().backend == "hip"
@@ -319,9 +319,8 @@ def extend_attention_fwd(
 
     k_buffer, v_buffer: (prefix + extend) tensors in mem_manager
     """
-    Lq, Lk, Lv = (
+    Lq, Lv = (
         q_extend.shape[-1],
-        k_extend.shape[-1],
         v_extend.shape[-1],
     )
 
@@ -339,36 +338,9 @@ def extend_attention_fwd(
         BLOCK_DPE = 0
     BLOCK_DV = triton.next_power_of_2(Lv)
 
-    if _is_hip:
-        BLOCK_M, BLOCK_N = (64, 64)
-        num_warps = 4
+    BLOCK_M, BLOCK_N = (64, 64)
+    num_warps = 4
 
-    else:
-        if _is_cuda and CUDA_CAPABILITY[0] >= 9:
-            if Lq <= 256:
-                BLOCK_M, BLOCK_N = (128, 64)
-            else:
-                BLOCK_M, BLOCK_N = (32, 64)
-        elif _is_cuda and CUDA_CAPABILITY[0] >= 8:
-            # sm86/sm89 has a much smaller shared memory size (100K) than sm80 (160K)
-            if CUDA_CAPABILITY[1] == 9 or CUDA_CAPABILITY[1] == 6:
-                if Lq <= 128:
-                    BLOCK_M, BLOCK_N = (64, 128)
-                elif Lq <= 256:
-                    BLOCK_M, BLOCK_N = (64, 64)
-                else:
-                    BLOCK_M, BLOCK_N = (32, 32)
-            else:
-                if Lq <= 128:
-                    BLOCK_M, BLOCK_N = (128, 128)
-                elif Lq <= 256:
-                    BLOCK_M, BLOCK_N = (64, 64)
-                else:
-                    BLOCK_M, BLOCK_N = (32, 64)
-        else:
-            BLOCK_M, BLOCK_N = (64, 64) if Lq <= 128 else (32, 32)
-
-        num_warps = 4 if Lk <= 64 else 8
 
     sm_scale = sm_scale or 1.0 / (Lq**0.5)
     batch_size, head_num = qo_indptr.shape[0] - 1, q_extend.shape[1]
@@ -382,8 +354,8 @@ def extend_attention_fwd(
     num_stages = 1
 
     extra_kargs = {}
-    if _is_hip:
-        extra_kargs = {"waves_per_eu": 1, "matrix_instr_nonkdim": 16, "kpack": 2}
+
+    extra_kargs = {"waves_per_eu": 1, "matrix_instr_nonkdim": 16, "kpack": 2}
 
     _fwd_kernel[grid](
         q_extend,
