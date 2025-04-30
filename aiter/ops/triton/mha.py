@@ -1148,8 +1148,6 @@ def _bwd_dkdvdq_inner(
     curr_m = start_m
     step_m = BLOCK_M
     curr_philox_offset = batch_philox_offset
-    curr_dropout_offset = dropout_offset
-    RCP_LN2: tl.constexpr = 1.4426950408889634
 
     #Iterate over blocks(BLOCK_M size) of Q while calculating 
     #a fixed block(BLOCK_N) of dk and dv. Note, during backward
