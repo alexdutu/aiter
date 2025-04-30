@@ -9,13 +9,8 @@ import sys
 import warnings
 import argparse
 
-# Add two parent directories to sys.path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(os.path.dirname(current_dir))
-sys.path.append(parent_dir)
-
 from aiter.ops.triton.mha import flash_attn_func, flash_attn_fp8_func, flash_attn_varlen_func, flash_attn_varlen_fp8_func
-from aiter.test_mha_common import attention_ref, generate_random_padding_mask, generate_qkv, pad_rearrange_dropout_mask_hts_to_bhss 
+from aiter.test_mha_common import attention_ref, generate_random_padding_mask, generate_qkv, pad_rearrange_dropout_mask_hts_to_bhss
 import sys
 
 # thd layout
@@ -134,7 +129,7 @@ def model_benchmark_configs(args):
 
 def pad_rearrange_dropout_mask(S_dmask, cu_seqlens_q, cu_seqlens_k,  max_seqlen_q, max_seqlen_k, seqlen_q, seqlen_k, num_q_heads):
     batch_size = cu_seqlens_q.numel() - 1
-    
+
     padded_dropout_mask = torch.ones((batch_size, num_q_heads, seqlen_q, seqlen_k), device="cuda")
     for b in range(batch_size):
         start_q = cu_seqlens_q[b].item()
@@ -146,8 +141,8 @@ def pad_rearrange_dropout_mask(S_dmask, cu_seqlens_q, cu_seqlens_k,  max_seqlen_
         seqlen_k = end_k - start_k
         for h in range(S_dmask.shape[1]):
                 padded_dropout_mask[b, h, :max_seqlen_q, :max_seqlen_k] = S_dmask[b, h, : ,:]
-    
-    
+
+
     return padded_dropout_mask
 
 
@@ -275,7 +270,14 @@ def run_benchmark(custom, args):
                     flops_per_matmul += seqlen_q * seqlen_k * HQ * D_HEAD * 2
         else:
             q_input, k_input, v_input = q, k, v
-            output_pad_fn = dq_pad_fn = dk_pad_fn = lambda x: x
+            def output_pad_fn(x):
+                return x
+
+            def dq_pad_fn(x):
+                return x
+
+            def dk_pad_fn(x):
+                return x
 
             if causal:
                 valid_out_elements = ((N_CTX_K**2 + N_CTX_K) / 2) if N_CTX_Q > N_CTX_K else \
@@ -287,17 +289,18 @@ def run_benchmark(custom, args):
         # Test mode: Verify outputs match
         if hasattr(args, 'test_mode') and args.test_mode:
             # Triton
-            if varlen:
-                triton_fn = lambda: flash_attn_varlen_func(
-                    q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
-                    dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
-                )
-            else:
-                triton_fn = lambda: flash_attn_func(
-                    q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
-                )
+            def triton_fn():
+                if varlen:
+                    return flash_attn_varlen_func(
+                        q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+                        dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                    )
+                else:
+                    return flash_attn_func(
+                        q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                    )
             with torch.enable_grad():
                 triton_out, _, sd_mask = triton_fn()
                 dropout_mask = sd_mask >= 0 if dropout > 0.0 else None
@@ -308,7 +311,9 @@ def run_benchmark(custom, args):
             triton_dv = dk_pad_fn(triton_dv)
 
             # Torch
-            torch_fn = lambda: attention_ref(q, k, v, dropout_p=dropout, dropout_mask=dropout_mask, causal=causal)
+            def torch_fn():
+                return attention_ref(q, k, v, dropout_p=dropout, dropout_mask=dropout_mask, causal=causal)
+
             with torch.enable_grad():
                 torch_out, _ = torch_fn()
                 torch_dq, torch_dk, torch_dv = torch.autograd.grad(torch_out, (q, k, v), do)
@@ -325,42 +330,54 @@ def run_benchmark(custom, args):
 
         # Benchmark mode
         if "Torch" in provider:
-            fn = lambda: attention_ref(q, k, v, dropout_p=dropout, causal=causal)
+            def torch_forward():
+                return attention_ref(q, k, v, dropout_p=dropout, causal=causal)
+
+            fn = torch_forward
             if mode=="bwd":
                 with torch.enable_grad():
-                    torch_out, _ = fn()
-                    fn = lambda: torch.autograd.grad(torch_out, (q, k, v), do, retain_graph=True)
+                    torch_out, _ = torch_forward()
+                    def torch_backward():
+                        return torch.autograd.grad(torch_out, (q, k, v), do, retain_graph=True)
+                    fn = torch_backward
         else:  # Triton
             if varlen:
                 if args.fp8:
-                    fn = lambda: flash_attn_varlen_fp8_func(
-                        q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
-                        dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
-                    )
+                    def triton_forward():
+                        return flash_attn_varlen_fp8_func(
+                            q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+                            dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                            return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                        )
                 else:
-                    fn = lambda: flash_attn_varlen_func(
-                        q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
-                        dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
-                    )
+                    def triton_forward():
+                        return flash_attn_varlen_func(
+                            q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+                            dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                            return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                        )
             else:
                 if args.fp8:
-                    fn = lambda: flash_attn_fp8_func(
-                        q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
-                    )
+                    def triton_forward():
+                        return flash_attn_fp8_func(
+                            q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                            return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                        )
                 else:
-                    fn = lambda: flash_attn_func(
-                        q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
-                    )
+                    def triton_forward():
+                        return flash_attn_func(
+                            q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                            return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                        )
+                fn = triton_forward
             if mode=="bwd":
                 with torch.enable_grad():
-                    triton_out, _, _ = fn()
+                    triton_out, _, _ = triton_forward()
                     if varlen:
                         triton_out = output_pad_fn(triton_out)
-                    fn = lambda: torch.autograd.grad(triton_out, (q_input, k_input, v_input), do.clone(), retain_graph=True)
+                        def triton_backward():
+                            return torch.autograd.grad(triton_out, (q_input, k_input, v_input), do.clone(), retain_graph=True)
+                        fn = triton_backward
 
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 
@@ -382,7 +399,7 @@ def run_benchmark(custom, args):
                total_num_tokens_q * HQ * D_HEAD * output_bytes)
 
         # return ms
-        
+
         if "ms" in provider:
             return ms
         elif "TFLOPS" in provider:
@@ -411,7 +428,7 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def parse_args():
-    
+
     parser = argparse.ArgumentParser(
         prog="Benchmark FlashAttention",
         allow_abbrev=False,
@@ -444,9 +461,9 @@ def parse_args():
     # prints TFLOPS without setting the following
     parser.add_argument("-return_time", action='store_true', default=False, help="Prints only walltime.")
     parser.add_argument("-return_bandwidth", action='store_true', default=False, help="Prints only memory bandwidth.")
-    
+
     parser.add_argument("-layout", type=str, default=None, help=supported_layouts())
-    
+
 
     parser.add_argument(
         "-persistent", nargs='?', const='fixed', choices=['fixed', 'dynamic'], default=None,
@@ -459,7 +476,7 @@ arg_to_torch_dtype = {'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': tor
 
 def main():
     args = parse_args()
-    
+
     if args.model:
         if args.causal is None:  # User didn’t specify -causal
             args.causal = True
@@ -472,7 +489,7 @@ def main():
             args.causal = False
         if args.layout is None:  # User didn’t specify -layout
             args.layout = 'bshd'
-    
+
     custom_config = False
 
     assert args.layout == 'thd' or not args.equal_seqlens or args.model, \
@@ -503,8 +520,11 @@ def main():
     if args.print_vgpr:
         assert not args.bench_torch, "Do not use -bench_torch with -print_vgpr."
         print("Retrieving VGPR usage for Triton kernels...")
-        fun = lambda: run_benchmark(custom_config, args)
-        print_vgpr(fun, "fused-attention")        
+
+        def run_benchmark_function():
+            return run_benchmark(custom_config, args)
+
+        print_vgpr(run_benchmark_function, "fused-attention")
         return 0
 
 
