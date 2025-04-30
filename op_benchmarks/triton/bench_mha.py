@@ -10,7 +10,7 @@ import warnings
 import argparse
 
 from aiter.ops.triton.mha import flash_attn_func, flash_attn_fp8_func, flash_attn_varlen_func, flash_attn_varlen_fp8_func
-from aiter.test_mha_common import attention_ref, generate_random_padding_mask, generate_qkv, pad_rearrange_dropout_mask_hts_to_bhss
+from aiter.test_mha_common import attention_ref, generate_random_padding_mask, generate_qkv
 import sys
 
 # thd layout
