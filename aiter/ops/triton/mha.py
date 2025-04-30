@@ -1496,7 +1496,6 @@ def _bwd_kernel_dkdvdq_causal(
 
     start_m += num_steps * MASK_BLOCK_M
     num_steps = tl.cdiv(seqlen_q - start_m, BLOCK_M)
-    end_m = start_m + num_steps * BLOCK_M
 
     
 
