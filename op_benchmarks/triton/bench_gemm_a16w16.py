@@ -74,7 +74,7 @@ def run_benchmark(args):
     def bench_gemm_a16w16(M, N, K, metric, provider):
         # NOTE: Assume bias and output has the same dtype
         c_dtype = torch.bfloat16
-        x, w = generate_gemm_a16w16_inputs(M, N, K, c_dtype)
+        x, w = generate_gemm_a16w16_inputs(M, N, K, c_dtype, args.layout)
         # flops
         flops = 2.0 * M * N * K
         # memory transfer
@@ -119,6 +119,8 @@ def parse_args():
             help="user-defined shape to benchmark")
     parser.add_argument("--metric", type=str, choices=["time", "throughput", "bandwidth"],
             default="throughput", help="metric to plot")
+    parser.add_argument("--layout", type=str, choices=["tt", "tn", "nt", "nn"],
+            default="tn", help="Layout of input and weight matrix")
     args = parser.parse_args()
     return args
 

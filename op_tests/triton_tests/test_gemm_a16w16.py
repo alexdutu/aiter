@@ -5,9 +5,16 @@ import pytest
 from aiter.ops.triton.gemm_a16w16 import gemm_a16w16
 
 
-def generate_gemm_a16w16_inputs(M, N, K, dtype):
-    x = torch.randn((M, K), dtype=dtype).cuda()
-    weight = torch.randn((K, N), dtype=dtype).cuda()
+def generate_gemm_a16w16_inputs(M, N, K, dtype, layout="tn"):
+    if layout[0] == 't':
+        x = torch.randn((M, K), dtype=dtype).cuda()
+    else:
+        x = torch.randn((K, M), dtype=dtype).cuda().T
+
+    if layout[1] == 't':
+        weight = torch.randn((K, N), dtype=dtype).cuda()
+    else:
+        weight = torch.randn((N, K), dtype=dtype).cuda().T
 
     return x, weight
 
