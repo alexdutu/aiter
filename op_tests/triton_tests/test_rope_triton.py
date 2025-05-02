@@ -12,11 +12,54 @@ from test_rope import ref_rope_sbhd_fwd, ref_rope_thd_fwd, RotateStyle, ref_rope
 from aiter.ops.triton.rope import (
     rope_fwd, rope_fwd_inplace, 
     rope_fwd_thd, rope_fwd_thd_inplace, 
-    rope_cached_fwd, rope_cached_fwd_inplace, rope_cached_positions_fwd, rope_cached_positions_fwd_inplace, rope_cached_positions_offsets_fwd, rope_cached_positions_offsets_fwd_inplace,
+    rope_cached_fwd, rope_cached_fwd_inplace, 
+    rope_cached_positions_fwd, rope_cached_positions_fwd_inplace, 
+    rope_cached_positions_offsets_fwd, rope_cached_positions_offsets_fwd_inplace,
+    rope_cached_thd_positions_2c_fwd,
     rope_fwd_2d, rope_fwd_2d_inplace,
     )
 
-DEBUG_MODE = False
+DEBUG_MODE = True
+
+def ref_rope_cached_thd_positions_2c_fwd(x: torch.Tensor,
+                                        y: torch.Tensor,
+                                        cos: torch.Tensor,
+                                        sin: torch.Tensor,
+                                        positions: torch.Tensor
+                                ) -> torch.Tensor:
+    """
+    Args:
+        x: [num_tokens, num_heads, head_size]
+        cos: [num_tokens, head_size // 2]
+        sin: [num_tokens, head_size // 2]
+        positions: [num_tokens,]
+    """
+    cos = cos[positions]
+    sin = sin[positions]
+    cos = cos.unsqueeze(-2).to(x.dtype)
+    sin = sin.unsqueeze(-2).to(x.dtype)
+
+    #Rotate GPTJ style
+    x1 = x[..., ::2]
+    x2 = x[..., 1::2]
+
+    #Compute out_x
+    ox1 = x1 * cos - x2 * sin
+    ox2 = x2 * cos + x1 * sin
+
+    ox = torch.stack((ox1, ox2), dim=-1).flatten(-2)
+
+    #Rotate GPTJ style
+    y1 = y[..., ::2]
+    y2 = y[..., 1::2]
+
+    #Compute out_x
+    oy1 = y1 * cos - y2 * sin
+    oy2 = y2 * cos + y1 * sin
+
+    oy = torch.stack((oy1, oy2), dim=-1).flatten(-2)
+
+    return ox, oy
 
 @pytest.mark.parametrize('B', [1, 2, 15, 32, 57])
 @pytest.mark.parametrize('S', [2, 10, 32])
@@ -169,7 +212,44 @@ def test_rope_fwd_cached(B: int, S: int, H: int, D: int, rotate_style: int, reus
         print(f"triton_out={triton_out}")
     torch.testing.assert_close(triton_out, torch_out,atol=1e-1, rtol=1e-1)
 
+@pytest.mark.parametrize('T', [(4), (6), (100), (320), (500)])
+@pytest.mark.parametrize('H', [1, 8, 32])
+@pytest.mark.parametrize('D', [4, 64, 128])  #For now, D is power of 2.
+#@pytest.mark.parametrize('rotate_style', [ RotateStyle.NEOX, RotateStyle.GPTJ]) #TODO add support for NEOX
+#@pytest.mark.parametrize('rotate_style', [ RotateStyle.GPTJ])
+#@pytest.mark.parametrize('nope, nope_first', [(False, False)])
+#@pytest.mark.parametrize('reuse_freqs_front_part', [True, False]) #TODO add support for False
+#@pytest.mark.parametrize('reuse_freqs_front_part', [True])
+#@pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16]) #TODO bf16 results in accuracy issues
+@pytest.mark.parametrize('dtype', [torch.float16])
+#@pytest.mark.parametrize('inplace',[True, False])
+#@pytest.mark.parametrize('positions, offsets',[(False, False), (True,False), (True,True)])
+def test_rope_fwd_cached_thd_position_2c(T: int, H: int, D: int, dtype: torch.dtype):
+    torch.manual_seed(20)
+    x = torch.randn((T, H, D), dtype=dtype, device="cuda")
+    y = torch.randn((T, H, D), dtype=dtype, device="cuda")
 
+    freqs_D = D // 2 #Reuse_freqs_front_part=True
+    freqs = torch.randn((T, freqs_D), dtype=dtype, device="cuda")
+
+    positions = torch.randint(0,  T, (T,), device="cuda") 
+    #positions = torch.arange(0,  T, device="cuda") 
+    cos = torch.cos(freqs)
+    sin = torch.sin(freqs)
+
+    triton_out_x, triton_out_y = rope_cached_thd_positions_2c_fwd(x, y, cos, sin, positions,  rotate_style=RotateStyle.GPTJ, reuse_freqs_front_part=True, nope_first=False, transpose_output=False)
+    if DEBUG_MODE:
+        print(f"triton_out_x={triton_out_x}")
+        print(f"triton_out_y={triton_out_y}")
+
+
+    torch_out_x, torch_out_y = ref_rope_cached_thd_positions_2c_fwd(x, y, cos, sin, positions)
+    if DEBUG_MODE:
+        print(f"torch_out_x={torch_out_x}")
+        print(f"torch_out_y={torch_out_y}")
+
+    torch.testing.assert_close(triton_out_x, torch_out_x,atol=1e-1, rtol=1e-1)
+    torch.testing.assert_close(triton_out_y, torch_out_y,atol=1e-1, rtol=1e-1)
 
 @pytest.mark.parametrize('B', [1,2, 15, 32, 57])
 @pytest.mark.parametrize('H', [1, 8, 32])
