@@ -249,29 +249,14 @@ class RotaryEmbedding(nn.Module):
         cos, sin = self.cos_cache, self.sin_cache
 
         rotate_style = 0 if self.is_neox_style else 1
-        assert (
-            len(query.shape) == 4
-        ), "Query tensor must be 4D: [batch_size, seq_len, num_heads, head_size]"
-        query_shape = query.shape
-        if key is not None:
-            assert (
-                len(key.shape) == 4
-            ), "Key tensor must be 4D: [batch_size, seq_len, num_heads, head_size]"
-            key_shape = key.shape
-        # if query.dim() == 3 and query.shape[-1] == self.head_size: # [num_tokens, num_heads, head_size]
-        #     query = query.unsqueeze(0)
-        # elif query.dim() == 3: # [batch_size, seq_len, num_heads*head_size]
-        #     query = query.view(query.size(0), query.size(1), query.size(2)// self.head_size, self.head_size)
-        # elif query.dim() == 2: # [num_tokens, num_heads*head_size]
-        #     query = query.view(1, query.size(0), query.size(1)// self.head_size, self.head_size)
 
-        # if key is not None:
-        #     if key.dim() == 3 and key.shape[-1] == self.head_size: # [num_tokens, num_heads, head_size]
-        #         key = key.unsqueeze(0)
-        #     elif key.dim() == 3: # [batch_size, seq_len, num_heads*head_size]
-        #         key = key.view(key.size(0), key.size(1), key.size(2)// self.head_size, self.head_size)
-        #     elif key.dim() == 2: # [num_tokens, num_heads*head_size]
-        #         key = key.view(1, key.size(0), key.size(1)// self.head_size, self.head_size)
+        num_tokens = positions.numel()
+
+        query_shape = query.shape
+        query = query.view(1, num_tokens, -1, self.head_size)
+        if key is not None:
+            key_shape = key.shape
+            key = key.view(1, num_tokens, -1, self.head_size)
 
         positions = positions.view(*query.shape[:2])
         if offsets is not None:
