@@ -1543,15 +1543,16 @@ def _rope_fwd_kernel_gptj_cached_thd_position_2c(x_ptr: torch.Tensor,
                 stride_out_t, stride_out_h, stride_out_d,
                 reuse_freqs_front_part: tl.constexpr,
                 SEQ_LEN: tl.constexpr,
-                SEQ_LEN_POW2: tl.constexpr,
                 D_MODEL: tl.constexpr,
                 D_MODEL_HALF: tl.constexpr,
+                SPLIT_SEQ_SIZE: tl.constexpr,
 ):
     #Parallelize over head. Handle 1 sequence per program
     h = tl.program_id(0)
+    s = tl.program_id(1)
 
     #Load cos for this head
-    pos_offs = tl.arange(0, SEQ_LEN_POW2)
+    pos_offs = s * SPLIT_SEQ_SIZE + tl.arange(0, SPLIT_SEQ_SIZE)
     pos_mask = pos_offs < SEQ_LEN
     pos = tl.load(pos_ptr + pos_offs, mask=pos_mask)
     cos_offs_t = pos
@@ -1562,6 +1563,7 @@ def _rope_fwd_kernel_gptj_cached_thd_position_2c(x_ptr: torch.Tensor,
     else:
         cos_offs_d = tl.arange(0, D_MODEL)
         cos_mask_d = cos_offs_d < D_MODEL
+
     cos_mask = (cos_offs_t < SEQ_LEN)[:, None] & (cos_mask_d)[None, :]
     cos_offs = (stride_cos_t * cos_offs_t[:, None] +
                 stride_cos_d * cos_offs_d[None, :])
@@ -1569,7 +1571,7 @@ def _rope_fwd_kernel_gptj_cached_thd_position_2c(x_ptr: torch.Tensor,
     sin = tl.load(sin_ptr + cos_offs, mask=cos_mask)
 
     #Load X [SEQ_LEN, D_MODEL]
-    x_offs_t = tl.arange(0, SEQ_LEN_POW2)
+    x_offs_t = s * SPLIT_SEQ_SIZE + tl.arange(0, SPLIT_SEQ_SIZE)
     x_offs_d = tl.arange(0, D_MODEL)
     x_offs = (x_offs_t[:, None] * stride_x_t + 
             stride_x_h*h +
@@ -2119,12 +2121,12 @@ def _rope_cached_thd_positions_2c_fwd(
     else:
         have_nope = False
 
-    grid = (h,1,1)
+    SPLIT_SEQ_SIZE = 128
+    grid = (h, triton.cdiv(t, SPLIT_SEQ_SIZE), 1)
 
-    t_pow2 = triton.next_power_of_2(t)
     _rope_fwd_kernel_gptj_cached_thd_position_2c[grid](x, y,  cos, sin, positions, out_x, out_y,
                                     *x.stride(), *cos.stride(),*positions.stride(), *out_x.stride(), 
-                                    reuse_freqs_front_part, t, t_pow2, d, d // 2)
+                                    reuse_freqs_front_part, t, d, d // 2, SPLIT_SEQ_SIZE=SPLIT_SEQ_SIZE)
     return out_x, out_y
 
 def rope_cached_thd_positions_2c_fwd(
