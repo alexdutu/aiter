@@ -67,7 +67,7 @@ def get_x_vals():
     dtype = torch.bfloat16
 
     x_vals = [(B, 2**i, H, D, cached, rotate_style, reuse_freqs_front_part, nope, nope_first, pos, offs, two_inputs, layout, inplace, dtype) 
-              for i in range(0, 13)] # range(0, 12)
+              for i in range(0, 13)]
     return x_vals
 
 def run_benchmark(args):
