@@ -796,7 +796,9 @@ class DeepseekScalingRotaryEmbedding(RotaryEmbedding):
         offsets: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         query, key = super().forward(positions, query, key, offsets)
-        return query.contiguous(), key.contiguous()
+        if positions.numel() == 1:
+            key = key.clone()
+        return query, key
 
 class Llama3RotaryEmbedding(RotaryEmbedding):
 
@@ -1204,3 +1206,28 @@ def get_rope(
             raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
     _ROPE_DICT[key] = rotary_emb
     return rotary_emb
+
+def get_rope_wrapper(
+    head_size: int,
+    rotary_dim: int,
+    max_position: int,
+    base: int,
+    is_neox_style: bool = True,
+    rope_scaling: Optional[Dict[str, Any]] = None,
+    dtype: Optional[torch.dtype] = None,
+    partial_rotary_factor: float = 1.0,
+    device: Optional[str] = None,
+):
+    if device != "cpu":
+        return get_rope(
+            head_size,
+            rotary_dim,
+            max_position,
+            base,
+            is_neox_style,
+            rope_scaling,
+            dtype,
+            partial_rotary_factor,
+        )
+
+    assert False, "get_rope_wrapper in AITER is not implemented for cpu device"
