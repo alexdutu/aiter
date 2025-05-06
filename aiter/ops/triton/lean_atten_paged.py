@@ -424,11 +424,6 @@ def _attn_lean_tile(
         order=(1, 0),
     )
 
-
-    #offs_m = tile_idx * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_m = tl.arange(0, BLOCK_M)
-    offs_n = tl.arange(0, BLOCK_N)
-
     for iter in range(local_iter, local_iter_end):
         # update k/v pointer
         kv_block_id = tl.load(KV_block_tables_ptr, cache_modifier=".cg")
