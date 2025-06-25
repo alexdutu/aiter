@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
+import torch
 from torch import Tensor
-from typing import List, Optional
-from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR
-import torch.nn.functional as F
+from typing import Optional
+from ..jit.core import compile_ops
 
 MD_NAME = "module_rmsnorm"
-
 
 
 @compile_ops("module_rmsnorm")
@@ -16,23 +15,23 @@ def rms_norm_cu(
     input: Tensor,
     weight: Tensor,
     epsilon: float,
-): 
-    '''
+):
+    """
     Cuda version of rmsnorm
-    '''
+    """
     ...
 
 
 @compile_ops("module_rmsnorm")
 def fused_add_rms_norm_cu(
-    input: Tensor,        # input/out 
-    residual_in: Tensor,  # residual_in/out 
+    input: Tensor,  # input/out
+    residual_in: Tensor,  # residual_in/out
     weight: Tensor,
     epsilon: float,
-): 
-    '''
+):
+    """
     Cuda version of rmsnorm fused add
-    '''
+    """
     ...
 
 
@@ -41,20 +40,17 @@ def rms_norm(
     input: Tensor,
     weight: Tensor,
     epsilon: float,
-): 
-    '''
+):
+    """
     CK version of rmsnorm
-    '''
+    """
     ...
+
 
 @compile_ops("module_rmsnorm")
 def rmsnorm2d_fwd(
-    input: Tensor,
-    # normalized_shape: List[int],
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
-    eps: float = 1e-5,
-) -> Tensor: ...
+    input: torch.Tensor, weight: torch.Tensor, epsilon: float
+) -> torch.Tensor: ...
 
 
 @compile_ops("module_rmsnorm")
@@ -94,11 +90,8 @@ def rmsnorm2d_fwd_with_add_smoothquant(
 
 @compile_ops("module_rmsnorm")
 def rmsnorm2d_fwd_with_dynamicquant(
-    out: Tensor,
-    input: Tensor,
-    yscale: Tensor,
-    weight: Tensor,
-    epsilon: float):...
+    out: Tensor, input: Tensor, yscale: Tensor, weight: Tensor, epsilon: float
+): ...
 
 
 @compile_ops("module_rmsnorm")
@@ -109,4 +102,5 @@ def rmsnorm2d_fwd_with_add_dynamicquant(
     residual_out: Tensor,
     yscale: Tensor,
     weight: Tensor,
-    epsilon: float):...
+    epsilon: float,
+): ...

@@ -1,10 +1,13 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+
 import torch
 import triton
-import triton.language as tl
 import pytest
 from aiter.ops.triton.gemm_a8w8_blockscale import gemm_a8w8_blockscale
+from aiter.ops.triton.utils.arch_info import get_fp8_dtypes
+from aiter.ops.triton.utils.types import str_to_torch_dtype
 import torch.nn.functional as F
-from einops import rearrange
 
 
 block_shape = (128, 128)
@@ -29,26 +32,11 @@ def run_torch(x, weight, x_scale, w_scale, dtype=torch.bfloat16):
     return out.to(dtype)
 
 
-def run_triton(x, weight, x_scale, w_scale, dtype=torch.bfloat16):
-    return gemm_a8w8_blockscale(x, weight, x_scale, w_scale, dtype)
+def run_triton(x, weight, x_scale, w_scale, dtype=torch.bfloat16, y=None):
+    return gemm_a8w8_blockscale(x, weight, x_scale, w_scale, dtype, y)
 
 
-def is_cdna4():
-    return triton.runtime.driver.active.get_current_target().arch == "gfx950"
-
-
-e5m2_type = torch.float8_e5m2 if is_cdna4() else torch.float8_e5m2fnuz
-e4m3_type = torch.float8_e4m3fn if is_cdna4() else torch.float8_e4m3fnuz
-
-name_to_torch_types = {
-    "int8": torch.int8,
-    "int32": torch.int32,
-    "fp16": torch.float16,
-    "fp32": torch.float32,
-    "bf16": torch.bfloat16,
-    "fp8e5": e5m2_type,
-    "fp8e4": e4m3_type,
-}
+e5m2_type, e4m3_type = get_fp8_dtypes()
 
 
 def get_x_vals():
@@ -89,34 +77,49 @@ def get_x_vals():
     return x_vals
 
 
-def generate_gemm_a8w8_blockscale_inputs(M, N, K, block_shape_n, block_shape_k):
+def generate_gemm_a8w8_blockscale_inputs(
+    M, N, K, block_shape_n, block_shape_k, dtype=torch.bfloat16, output=False
+):
     scale_n = (N + block_shape_n - 1) // block_shape_n
     scale_k = (K + block_shape_k - 1) // block_shape_k
 
-    x = (torch.rand((M, K), dtype=torch.float16, device="cuda") / 10).to(
-        e4m3_type
-    )
-    weight = (torch.rand((N, K), dtype=torch.float16, device="cuda") / 10).to(
-        e4m3_type
-    )
+    x = (torch.rand((M, K), dtype=torch.float16, device="cuda") / 10).to(e4m3_type)
+    weight = (torch.rand((N, K), dtype=torch.float16, device="cuda") / 10).to(e4m3_type)
 
     x_scale = torch.rand([M, scale_k], dtype=torch.float32, device="cuda")
     w_scale = torch.rand([scale_n, scale_k], dtype=torch.float32, device="cuda")
 
-    return x, weight, x_scale, w_scale
+    y = None
+    if output:
+        y = torch.empty((M, N), dtype=dtype, device="cuda").cuda()
+
+    return x, weight, x_scale, w_scale, y
 
 
 @pytest.mark.parametrize(
-    "dtype, M, N, K", [(dtype, *shape) for dtype in ["bf16"] for shape in get_x_vals()]
+    "dtype, M, N, K, output",
+    [
+        (dtype, *shape, output)
+        for output in [True, False]
+        for dtype in ["bf16"]
+        for shape in get_x_vals()
+    ],
 )
-def test_gemm(dtype, M, N, K):
+def test_gemm(dtype, M, N, K, output):
     block_shape_n, block_shape_k = block_shape
 
-    dtype = name_to_torch_types[dtype]
-    x, weight, x_scale, w_scale = generate_gemm_a8w8_blockscale_inputs(M, N, K, block_shape_n,
-            block_shape_k)
+    dtype = str_to_torch_dtype[dtype]
+    x, weight, x_scale, w_scale, y = generate_gemm_a8w8_blockscale_inputs(
+        M,
+        N,
+        K,
+        block_shape_n,
+        block_shape_k,
+        dtype,
+        output,
+    )
 
     a = run_torch(x, weight, x_scale, w_scale, dtype)
-    b = run_triton(x, weight, x_scale, w_scale, dtype)
+    b = run_triton(x, weight, x_scale, w_scale, dtype, y)
 
     triton.testing.assert_close(a, b, atol=0.01, rtol=1e-2)

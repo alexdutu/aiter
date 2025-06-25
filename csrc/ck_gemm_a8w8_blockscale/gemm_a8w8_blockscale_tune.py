@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 import os
-import sys
 import aiter
 import pandas as pd
 import torch
 import torch.nn.functional as F
 from aiter import dtypes
-from aiter.test_common import checkAllclose, perftest
-from gemm_a8w8_blockscale_common import kernelInstance, kernels_list
+from aiter.test_common import perftest
+from gemm_a8w8_blockscale_common import kernels_list
 import argparse
 from einops import rearrange
 
@@ -71,7 +70,7 @@ def get_tuned_gemm_list(tuned_gemm_file):
         tunedf = pd.read_csv(tuned_gemm_file)
     else:
         tunedf = pd.DataFrame(
-            columns=["M", "N", "K", "kernelId", "splitK", "us", "kernelName"]
+            columns=["cu_num", "M", "N", "K", "kernelId", "splitK", "us", "kernelName"]
         )
     return tunedf
 

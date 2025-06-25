@@ -1,14 +1,25 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+
 from typing import Optional
+import functools
+import json
+import os
 import torch
 import triton
 import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
+import aiter.ops.triton.utils.arch_info as arch_info
+from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 
 
-@triton.heuristics({
-    'EVEN_K':lambda args: args['K'] % args['BLOCK_SIZE_K'] == 0, 
-    'GRID_MN':lambda args: triton.cdiv(args['M'], args['BLOCK_SIZE_M']) * triton.cdiv(args['N'], args['BLOCK_SIZE_N'])
-})
+@triton.heuristics(
+    {
+        "EVEN_K": lambda args: args["K"] % args["BLOCK_SIZE_K"] == 0,
+        "GRID_MN": lambda args: triton.cdiv(args["M"], args["BLOCK_SIZE_M"])
+        * triton.cdiv(args["N"], args["BLOCK_SIZE_N"]),
+    }
+)
 @triton.jit
 def _gemm_a16_w16_kernel(
     a_ptr,
@@ -30,6 +41,7 @@ def _gemm_a16_w16_kernel(
     GROUP_SIZE_M: tl.constexpr,
     EVEN_K: tl.constexpr,
     GRID_MN: tl.constexpr,
+    cache_modifier: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -58,8 +70,8 @@ def _gemm_a16_w16_kernel(
 
     # Create pointers for first block of A and B input matrices
     offs_k = tl.arange(0, BLOCK_SIZE_K)
-    offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-    offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+    offs_am = (pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+    offs_bn = (pid_n.to(tl.int64) * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
     a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
     b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
 
@@ -71,10 +83,15 @@ def _gemm_a16_w16_kernel(
         # If it is out of bounds, set it to 0.
         if EVEN_K:
             a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
+            b = tl.load(b_ptrs, cache_modifier=cache_modifier)
         else:
             a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+            b = tl.load(
+                b_ptrs,
+                mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+                other=0.0,
+                cache_modifier=cache_modifier,
+            )
 
         accumulator += tl.dot(a, b, input_precision="ieee")
 
@@ -85,45 +102,76 @@ def _gemm_a16_w16_kernel(
     c = accumulator.to(c_ptr.type.element_ty)
 
     # Write back the block of the output matrix C with masks.
-    offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    offs_cm = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+    offs_cn = pid_n.to(tl.int64) * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
 
 
-# Wrapper for gemm kernel.
-def gemm_a16w16(x, 
-                w, 
-                dtype: Optional[float] = torch.bfloat16,
-                ):
+@functools.lru_cache(maxsize=1024)
+def _get_config(
+    M: int,
+    N: int,
+    K: int,
+):
+    if not hasattr(_get_config, "_config_dict"):
+        dev = arch_info.get_device()
+        _get_config._config_dict = {}
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-A16W16.json"
+        with open(fpath, "r") as file:
+            config = json.load(file)
+        _get_config._config_dict["default"] = config
+
+    key = f"{N}_{K}"
+    if key not in _get_config._config_dict.keys():
+        dev = arch_info.get_device()
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-A16W16-N={N}-K={2*K}.json"
+        if os.path.exists(fpath):
+            with open(fpath, "r") as file:
+                config = json.load(file)
+                _get_config._config_dict[key] = config
+        else:
+            key = "default"  # fall back to default config
+
+    if M < 128 and "small" in _get_config._config_dict[key]:
+        return _get_config._config_dict[key]["small"]
+    else:
+        return _get_config._config_dict[key]["any"]
+
+
+def gemm_a16w16(
+    x,
+    w,
+    dtype: Optional[float] = torch.bfloat16,
+    y: Optional[torch.Tensor] = None,
+    config: Optional[dict] = None,
+):
     """
     Computes the 16 bit matmul Y = X x W
 
     Key parameters:
     - X: Matrix X with shape (M, K).
     - W: Matrix W with shape (N, K).
+    - dtype: Optional parameter to specifcy bf16 or fp16 datatype. Default is bf16
+    - Y: Output Matrix Y with shape (M, N). If this is none, then it's created by this API and returned as output
 
     Returns:
     - Y: The output matrix with shape (M, N).
     """
-    
+
     M, K = x.shape
     K, N = w.shape
 
-    y = torch.empty((M, N), dtype=dtype, device=x.device)
+    if y is None:
+        y = torch.empty((M, N), dtype=dtype, device=x.device)
 
-    BLOCK_SIZE_M = 256
-    BLOCK_SIZE_N = 256
-    BLOCK_SIZE_K = 64
-    GROUP_SIZE_M = 4
-    waves_per_eu = 2
-    kpack = 1
-    matrix_instr_nonkdim = 16
-    num_warps = 8
-    num_stages = 2
+    if config is None:
+        config = _get_config(M, N, K)
 
-    grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
+    grid = lambda META: (  # noqa: E731
+        triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
+    )
     _gemm_a16_w16_kernel[grid](
         x,
         w,
@@ -137,15 +185,7 @@ def gemm_a16w16(x,
         w.stride(1),
         y.stride(0),
         y.stride(1),
-        BLOCK_SIZE_M,
-        BLOCK_SIZE_N,
-        BLOCK_SIZE_K,
-        GROUP_SIZE_M,
-        waves_per_eu=waves_per_eu,
-        kpack=kpack,
-        matrix_instr_nonkdim=matrix_instr_nonkdim,
-        num_warps=num_warps,
-        num_stages=num_stages,
+        **config,
     )
 
     return y

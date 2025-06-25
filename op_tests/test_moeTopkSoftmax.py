@@ -2,17 +2,14 @@
 # Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-import torch.nn.functional as F
 import aiter
 from aiter.test_common import (
     checkAllclose,
     benchmark,
     run_perftest,
     perftest,
-    tensor_load,
 )
 from aiter import dtypes
-from einops import rearrange
 import pandas as pd
 
 torch.set_default_device("cuda")
@@ -60,9 +57,8 @@ def test_fuse(
 
 
 @benchmark()
-def test_topk_softmax(dtype, m, n, E, topk):
-    dim = (m, n)
-    hidden_states = torch.randn(dim, dtype=dtype, device="cuda")
+def test_topk_softmax(dtype, token, E, topk):
+    hidden_states = torch.randn((token, 1), dtype=dtype, device="cuda")
     gating_output = torch.randn((m, E), dtype=dtype, device="cuda")
 
     (topk_weights_a, topk_ids_a), avg_a = test_nofuse(
@@ -71,8 +67,7 @@ def test_topk_softmax(dtype, m, n, E, topk):
     (topk_weights_b, topk_ids_b), avg_b = test_fuse(
         hidden_states, gating_output, topk, True
     )
-    msg = f"[perf] {m=}, {n=}, {E=}, {topk=}, dtype: {dtype}, ref avg: {avg_a:<8.2f} us, b avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}"
-    err = checkAllclose(topk_weights_a, topk_weights_b, atol=0.03, msg=msg)
+    err = checkAllclose(topk_weights_a, topk_weights_b, atol=0.03)
     checkAllclose(topk_ids_a, topk_ids_b, atol=0, msg="topk_ids")
     return {"err": err, "us": avg_b}
 
@@ -117,7 +112,7 @@ def test_biased_grouped_topk(
     # print(f'{id_aiter=}')
     # print(f'  {w_ref=}')
     # print(f'{w_aiter=}')
-    err = checkAllclose(w_ref, w_aiter, msg=f"topk_weights [golden vs aiter]")
+    err = checkAllclose(w_ref, w_aiter, msg="topk_weights [golden vs aiter]")
     checkAllclose(
         id_ref,
         id_aiter,
@@ -170,7 +165,7 @@ def test_grouped_topk(
     err = checkAllclose(
         w_ref.gather(1, _ref),
         w_aiter.gather(1, _aiter),
-        msg=f"topk_weights [golden vs aiter]",
+        msg="topk_weights [golden vs aiter]",
     )
     checkAllclose(
         id_ref,
@@ -182,10 +177,10 @@ def test_grouped_topk(
 
 
 df = []
-for dtype in [dtypes.fp16, dtypes.bf16]:
-    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256][-2:-1]:
-        for n in [4096, 8192, 16384, 32768, 65536][1:2]:
-            ret = test_topk_softmax(dtype, m, n, 32, 5)
+for dtype in [dtypes.fp16, dtypes.bf16][:1]:
+    for e in [64, 256][:]:
+        for m in [1, 8, 16, 32, 64, 128, 256, 65536, 163840][:]:
+            ret = test_topk_softmax(dtype, m, e, 5)
             df.append(ret)
 df = pd.DataFrame(df)
 aiter.logger.info(f"summary:\n{df}")

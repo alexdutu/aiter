@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
 import os
@@ -37,11 +37,13 @@ import importlib.util
 
 if importlib.util.find_spec("aiter_") is not None:
     from aiter_ import *
-from .jit import core
+from .jit import core as core
+from .utility import dtypes as dtypes
 from .ops.enum import *
 from .ops.norm import *
 from .ops.quant import *
 from .ops.gemm_op_a8w8 import *
+from .ops.gemm_op_a4w4 import *
 from .ops.batched_gemm_op_a8w8 import *
 from .ops.batched_gemm_op_bf16 import *
 from .ops.aiter_operator import *
@@ -59,4 +61,5 @@ from .ops.rope import *
 from .ops.topk import *
 from .ops.mha import *
 from .ops.gradlib import *
+from .ops.trans_ragged_layout import *
 from . import mla
