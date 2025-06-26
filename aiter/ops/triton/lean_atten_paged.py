@@ -130,13 +130,7 @@ def get_num_splits_and_buffer_sizes(
     num_m_blocks = (max_seqlen_q + BLOCK_M - 1) // BLOCK_M
     num_n_blocks = (max_seqlen_k + BLOCK_N - 1) // BLOCK_N
 
-    # TODO: Support Grouped-Query Attention
     max_seqlen_q = max_seqlen_q * num_heads // num_heads_k
-
-    # print(f"block_m: {BLOCK_M}, block_n: {BLOCK_N} ")
-    # print(f"num_m_block: {num_m_blocks}, num_n_block: {num_n_blocks} ")
-    # print(f"max_seqlen_q: {max_seqlen_q}, max_seqlen_k: {max_seqlen_k}")
-    # print(f"num_heads: {num_heads}, num_heads_k: {num_heads_k} ")
 
     tiles_per_head = 0
     tiles_per_head = num_m_blocks * num_n_blocks
@@ -147,10 +141,6 @@ def get_num_splits_and_buffer_sizes(
     # This should be a function of tile size and number of scratchpad space
     # LeanAttention assign 3 CTAs per SM (bounded by LDS size)
     lean_griddimz = num_SMs  # CTA launch grid
-    # if (total_tiles <= 2 * 2 * num_SMs):
-    #    lean_griddimz = min((total_tiles + 1) / 2, (32 * total_tiles + num_n_blocks - 1) / num_n_blocks)
-    # else:
-    #    lean_griddimz = min(2 * num_SMs, 32 * num_heads_k * batch_size * num_m_blocks)
 
     # Max number lean tiles per task block (CTA)
     max_tiles_per_tb = (total_tiles + lean_griddimz - 1) // lean_griddimz
@@ -339,7 +329,6 @@ def la_persistent_paged(
             tl.store(lp_ptrs, l_i, cache_modifier=".wt")
             tl.store(op_ptrs, acc, cache_modifier=".wt")
             tl.debug_barrier()
-            # tl.store(locks + current_pid, 1, cache_modifier=".wt")
             # According to streamK gemm, store + cache_modifier won't work universally
             # atomic_xchg is better solution but a less performant variant
             tl.atomic_xchg(locks + current_pid, 1)
@@ -382,7 +371,6 @@ def la_persistent_paged(
             for cta in range((current_pid + 1), last_cta):
                 # According to treamK gemm, atomic_cas is universal solution but less performant
                 while tl.atomic_cas(locks + cta, 1, 1) != 1:
-                    # while tl.load(locks + cta, cache_modifier=".cv", volatile=True) != 1:
                     pass
 
                 # Partial results are stored in [nonHost, Host-nonFinishing] layout
@@ -484,12 +472,10 @@ def _attn_lean_tile(
         p = tl.math.exp2(qk)  # p.shape = [BLOCK_M, BLOCK_N]
         # -- update output accumulator --
         alpha = tl.math.exp2(m_i - m_ij)
-        # alpha = tl.math.exp(m_i - m_ij)
         acc = (
             acc * alpha[:, None]
         )  # Scale each row of acc by the corresponding elements in alpha
         v = tl.load(V_bptr, cache_modifier=".cg")  # v.shape = [BLOCK_N, HEAD_DIM]
-        # v = tl.load(tl.multiple_of(V_block_ptr, (1,16)), cache_modifier=".cg")
         acc += tl.dot(p.to(v.dtype), v)  # acc.shape = [BLOCK_M, HEAD_DIM]
         # -- update l_i
         l_ij = tl.sum(p, 1)  # rowsum(p)
